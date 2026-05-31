@@ -10,11 +10,16 @@ Why a JSON-routing loop instead of OpenAI native function-calling?
 """
 from __future__ import annotations
 
+import logging
+import time
 from dataclasses import dataclass, field
+from uuid import uuid4
 
 from .config import settings
 from .llm import LocalLLM, Message
 from .tools import REGISTRY, tool_catalog
+
+logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = f"""You answer questions, using a tool when one helps.
 
@@ -60,6 +65,10 @@ class Agent:
         self.llm = llm or LocalLLM()
 
     def run(self, query: str) -> Result:
+        query_id = str(uuid4())
+        t_start = time.monotonic()
+        logger.info("Query started", extra={"query_id": query_id, "query": query})
+
         system = SYSTEM_PROMPT + (" /no_think" if settings.no_think else "")
         messages: list[Message] = [
             {"role": "system", "content": system},
@@ -69,8 +78,10 @@ class Agent:
         steps: list[Step] = []
         last_observation: str | None = None
 
-        for _ in range(settings.max_steps):
+        for step_num in range(settings.max_steps):
+            t_step = time.monotonic()
             decision = self.llm.chat_json(messages)
+            step_ms = round((time.monotonic() - t_step) * 1000)
 
             # Defensive fallback: model didn't return usable JSON. If we already
             # have a tool result, return that cleanly instead of dumping the
@@ -82,6 +93,11 @@ class Agent:
                 else:
                     answer = decision["_raw"].strip().split("\n\n")[0].strip()
                 steps.append(Step(kind="final", detail=answer))
+                logger.debug(
+                    "Step: raw fallback",
+                    extra={"query_id": query_id, "step": step_num + 1, "latency_ms": step_ms},
+                )
+                self._log_done(query_id, answer, steps, t_start)
                 return Result(answer=answer, steps=steps)
 
             action = decision.get("action")
@@ -97,6 +113,17 @@ class Agent:
                 steps.append(
                     Step(kind="tool", detail=f"{name}({tool_input!r})", observation=observation)
                 )
+                logger.debug(
+                    "Step: tool call",
+                    extra={
+                        "query_id": query_id,
+                        "step": step_num + 1,
+                        "tool": name,
+                        "input": tool_input,
+                        "observation": observation,
+                        "latency_ms": step_ms,
+                    },
+                )
                 # Feed the model its own action and the observation, then loop.
                 messages.append({"role": "assistant", "content": str(decision)})
                 messages.append(
@@ -108,6 +135,11 @@ class Agent:
             # action == "final" (or anything else we treat as terminal)
             answer = str(decision.get("answer", "")).strip() or "(no answer)"
             steps.append(Step(kind="final", detail=answer))
+            logger.debug(
+                "Step: final answer",
+                extra={"query_id": query_id, "step": step_num + 1, "latency_ms": step_ms},
+            )
+            self._log_done(query_id, answer, steps, t_start)
             return Result(answer=answer, steps=steps)
 
         # Loop budget exhausted: synthesise a best-effort answer from context.
@@ -115,4 +147,21 @@ class Agent:
             {"role": "user", "content": "Give your best final answer now in plain text."}
         ])
         steps.append(Step(kind="final", detail=fallback))
+        logger.warning(
+            "Loop budget exhausted, using synthesis fallback",
+            extra={"query_id": query_id, "max_steps": settings.max_steps},
+        )
+        self._log_done(query_id, fallback, steps, t_start)
         return Result(answer=fallback, steps=steps)
+
+    @staticmethod
+    def _log_done(query_id: str, answer: str, steps: list[Step], t_start: float) -> None:
+        logger.info(
+            "Query completed",
+            extra={
+                "query_id": query_id,
+                "total_steps": len(steps),
+                "total_ms": round((time.monotonic() - t_start) * 1000),
+                "answer_preview": answer[:120],
+            },
+        )

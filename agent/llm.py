@@ -9,13 +9,17 @@ a one-line config change.
 from __future__ import annotations
 
 import json
+import logging
 import re
+import time
 from typing import Any, cast
 
 from openai import OpenAI
 from openai.types.chat import ChatCompletionMessageParam
 
 from .config import settings
+
+logger = logging.getLogger(__name__)
 
 Message = dict[str, str]
 
@@ -37,18 +41,47 @@ class LocalLLM:
         ("is mimOE running? is a model loaded?") instead of a cryptic timeout
         mid-conversation.
         """
-        models = self._client.models.list()
-        return [m.id for m in models.data]
+        try:
+            models = self._client.models.list()
+            ids = [m.id for m in models.data]
+            logger.info("mimOE health check passed", extra={"loaded_models": ids, "base_url": settings.base_url})
+            return ids
+        except Exception:
+            logger.error("mimOE health check failed", extra={"base_url": settings.base_url}, exc_info=True)
+            raise
 
     def chat(self, messages: list[Message], **overrides: Any) -> str:
         """Single chat completion -> assistant text."""
+        temperature = overrides.get("temperature", settings.temperature)
+        max_tokens = overrides.get("max_tokens", settings.max_tokens)
+        logger.debug(
+            "LLM request",
+            extra={
+                "model": settings.model,
+                "temperature": temperature,
+                "max_tokens": max_tokens,
+                "message_count": len(messages),
+            },
+        )
+        t0 = time.monotonic()
         resp = self._client.chat.completions.create(
             model=settings.model,
             messages=cast(list[ChatCompletionMessageParam], messages),
-            temperature=overrides.get("temperature", settings.temperature),
-            max_tokens=overrides.get("max_tokens", settings.max_tokens),
+            temperature=temperature,
+            max_tokens=max_tokens,
         )
-        return (resp.choices[0].message.content or "").strip()
+        latency_ms = round((time.monotonic() - t0) * 1000)
+        content = (resp.choices[0].message.content or "").strip()
+        logger.debug(
+            "LLM response",
+            extra={
+                "latency_ms": latency_ms,
+                "finish_reason": resp.choices[0].finish_reason,
+                "output_tokens": resp.usage.completion_tokens if resp.usage else None,
+                "response_preview": content[:120],
+            },
+        )
+        return content
 
     def chat_json(self, messages: list[Message]) -> dict[str, Any]:
         """Chat completion whose response is parsed as a JSON object.
@@ -60,7 +93,10 @@ class LocalLLM:
         as a plain answer -- the agent degrades gracefully rather than crashing.
         """
         raw = self.chat(messages, temperature=0.0, max_tokens=settings.decision_max_tokens)
-        return _extract_json(raw)
+        result = _extract_json(raw)
+        if "_raw" in result:
+            logger.debug("JSON extraction failed, returning raw text", extra={"raw_preview": raw[:120]})
+        return result
 
 
 def _extract_json(text: str) -> dict[str, Any]:

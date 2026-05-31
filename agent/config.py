@@ -61,5 +61,9 @@ class Settings:
     # Network timeout (seconds) for a single inference call.
     request_timeout: float = float(os.getenv("MIMOE_TIMEOUT", "60"))
 
+    # Logging level. Use DEBUG to see full LLM request/response traces and
+    # per-step timing. Equivalent to passing --trace on the CLI.
+    log_level: str = os.getenv("LOG_LEVEL", "INFO")
+
 
 settings = Settings()
