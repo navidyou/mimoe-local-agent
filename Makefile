@@ -1,4 +1,4 @@
-.PHONY: install lint typecheck test test-cov run docker-build docker-run clean audit
+.PHONY: install lint typecheck test test-cov run server docker-build docker-run docker-server clean audit
 
 install:
 	pip install -e .[dev]
@@ -21,11 +21,21 @@ test-cov:
 run:
 	python -m agent.main
 
+server:
+	uvicorn agent.server:app --reload --port 3000
+
 docker-build:
 	docker build -t mimoe-agent .
 
 docker-run:
 	docker run --rm \
+		-e MIMOE_BASE_URL=http://host.docker.internal:8083/mimik-ai/openai/v1 \
+		-e MIMOE_API_KEY=1234 \
+		-e MIMOE_MODEL=smollm-360m \
+		mimoe-agent python -m agent.main
+
+docker-server:
+	docker run --rm -p 3000:3000 \
 		-e MIMOE_BASE_URL=http://host.docker.internal:8083/mimik-ai/openai/v1 \
 		-e MIMOE_API_KEY=1234 \
 		-e MIMOE_MODEL=smollm-360m \

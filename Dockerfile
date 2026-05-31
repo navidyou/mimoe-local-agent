@@ -5,22 +5,25 @@ RUN useradd -m -u 1000 agentuser
 
 WORKDIR /app
 
-# Install dependencies first (layer-cached separately from source code)
+# Install dependencies (layer-cached separately from source code)
 COPY pyproject.toml ./
 RUN pip install --no-cache-dir -e "." && pip install --no-cache-dir httpx
 
 # Copy source code
 COPY agent/ ./agent/
 
-# Switch to non-root user
 USER agentuser
 
-# Non-sensitive runtime defaults. Sensitive values (MIMOE_API_KEY) must be
-# passed at runtime via -e or docker-compose env_file — never baked into the image.
-#
-# On Linux: also pass --add-host=host.docker.internal:host-gateway
+# Non-sensitive defaults. Pass MIMOE_API_KEY at runtime — never bake secrets
+# into an image. On Linux add: --add-host=host.docker.internal:host-gateway
 ENV MIMOE_BASE_URL=http://host.docker.internal:8083/mimik-ai/openai/v1
 ENV MIMOE_MODEL=smollm-360m
 ENV LOG_LEVEL=INFO
+ENV SERVER_HOST=0.0.0.0
+ENV SERVER_PORT=3000
 
-ENTRYPOINT ["python", "-m", "agent.main"]
+EXPOSE 3000
+
+# Default: HTTP server (for mim / container deployment)
+# Override for CLI:  docker run ... python -m agent.main -q "..."
+ENTRYPOINT ["python", "-m", "agent.server"]
