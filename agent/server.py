@@ -207,7 +207,12 @@ def run() -> None:
     """Entry point for `mimoe-agent-server` CLI command and `python -m agent.server`."""
     host = os.getenv("SERVER_HOST", "0.0.0.0")
     port = int(os.getenv("SERVER_PORT", "3000"))
-    uvicorn.run("agent.server:app", host=host, port=port, log_config=None)
+    # ROOT_PATH is set by the mim start.json (MCM.BASE_API_PATH).
+    # It tells uvicorn/FastAPI that it is mounted under a sub-path so that
+    # /docs, redirects, and OpenAPI schema URLs all resolve correctly when
+    # the edgeEngine proxies traffic to this container.
+    root_path = os.getenv("ROOT_PATH", "")
+    uvicorn.run("agent.server:app", host=host, port=port, root_path=root_path, log_config=None)
 
 
 if __name__ == "__main__":

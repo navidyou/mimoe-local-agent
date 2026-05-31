@@ -1,0 +1,13 @@
+{
+  "name": "mimoe-local-agent",
+  "image": "mimoe-local-agent-v1",
+  "env": {
+    "MCM.BASE_API_PATH": "/mimoe-local-agent/v1",
+    "MCM.MAX_EXECUTION_TIME_SEC": "300",
+    "ROOT_PATH": "/mimoe-local-agent/v1",
+    "SERVER_PORT": "3000",
+    "MIMOE_BASE_URL": "http://localhost:8083/mimik-ai/openai/v1",
+    "MIMOE_MODEL": "qwen3-4b",
+    "LOG_LEVEL": "INFO"
+  }
+}
