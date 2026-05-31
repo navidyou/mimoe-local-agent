@@ -15,6 +15,9 @@ def test_calculator_basic():
 def test_calculator_rejects_unsafe_input():
     # No code execution path: arbitrary names/calls are not evaluated.
     assert calculator("__import__('os').system('echo hi')").startswith("Could not evaluate")
+    assert calculator("os.system('echo hi')").startswith("Could not evaluate")
+    assert calculator("subprocess.run(['ls'])").startswith("Could not evaluate")
+    assert calculator("open('/etc/passwd').read()").startswith("Could not evaluate")
 
 
 def test_text_stats():
