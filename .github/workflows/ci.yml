@@ -50,8 +50,120 @@ jobs:
           name: coverage-report
           path: coverage.xml
 
-  # Integration tests require a real mimOE node — skipped in CI by default.
-  # Set the MIMOE_AVAILABLE secret to "true" and provide MIMOE_BASE_URL to enable.
+  # ── Publish ────────────────────────────────────────────────────────────────
+  # Builds and pushes the Docker image to GitHub Container Registry (GHCR).
+  # Only runs on pushes to main (not on pull requests).
+  #
+  # No secrets to configure — GITHUB_TOKEN is provided automatically by Actions
+  # and has write access to packages in the same repo.
+  #
+  # The resulting image is available at:
+  #   ghcr.io/navidyou/mimoe-local-agent:latest
+  #   ghcr.io/navidyou/mimoe-local-agent:sha-<commit>
+  publish:
+    name: Build & push to GHCR
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+      packages: write   # required to push to ghcr.io
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=raw,value=latest
+            type=sha,prefix=sha-
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+  # ── Push-based fleet deploy ─────────────────────────────────────────────────
+  # SSHes into each registered device and pulls + restarts the agent container.
+  #
+  # Use this when your devices are REACHABLE from the internet (public IP, VPN,
+  # or Tailscale). For devices behind NAT (home networks, cellular), use the
+  # pull-based Watchtower approach in docker-compose.prod.yml instead.
+  #
+  # Required GitHub configuration (Settings → Secrets and variables):
+  #   Secret  DEPLOY_SSH_KEY   — private SSH key whose public key is in
+  #                              ~/.ssh/authorized_keys on each device
+  #   Variable DEPLOY_HOSTS    — newline-separated list of user@host entries,
+  #                              e.g.:  pi@192.168.1.10
+  #                                     pi@device-2.local
+  #   Variable DEPLOY_ENABLED  — set to "true" to activate this job
+  #
+  # The job is a no-op unless DEPLOY_ENABLED is explicitly "true", so it is
+  # safe to merge without configuring any of the above.
+  deploy:
+    name: Deploy to fleet (push-based)
+    runs-on: ubuntu-latest
+    needs: publish
+    if: >
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/main' &&
+      vars.DEPLOY_ENABLED == 'true'
+    steps:
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -t rsa,ed25519 github.com >> ~/.ssh/known_hosts 2>/dev/null || true
+
+      - name: Pull and restart agent on each device
+        env:
+          IMAGE: ghcr.io/${{ github.repository }}:latest
+          DEPLOY_HOSTS: ${{ vars.DEPLOY_HOSTS }}
+        run: |
+          echo "$DEPLOY_HOSTS" | while IFS= read -r host; do
+            [ -z "$host" ] && continue
+            echo "==> Deploying to $host"
+            ssh -i ~/.ssh/deploy_key \
+                -o StrictHostKeyChecking=no \
+                -o ConnectTimeout=15 \
+                "$host" bash -s <<EOF
+              set -e
+              # Pull the new image from GHCR
+              docker pull $IMAGE
+
+              # Restart via compose if a compose file exists, otherwise raw docker
+              if [ -f ~/mimoe-agent/docker-compose.prod.yml ]; then
+                cd ~/mimoe-agent
+                IMAGE=$IMAGE docker compose -f docker-compose.prod.yml up -d agent
+              else
+                docker stop mimoe-agent 2>/dev/null || true
+                docker rm   mimoe-agent 2>/dev/null || true
+                docker run -d --name mimoe-agent --restart unless-stopped \
+                  --add-host host.docker.internal:host-gateway \
+                  -e MIMOE_BASE_URL=http://host.docker.internal:8083/mimik-ai/openai/v1 \
+                  -e LOG_LEVEL=INFO \
+                  $IMAGE
+              fi
+              echo "Done on $host"
+          EOF
+          done
+
+  # ── Integration tests ────────────────────────────────────────────────────────
+  # Require a real mimOE node — skipped in CI by default.
+  # Set the MIMOE_AVAILABLE variable to "true" and provide MIMOE_BASE_URL to enable.
   integration:
     name: Integration tests
     runs-on: ubuntu-latest

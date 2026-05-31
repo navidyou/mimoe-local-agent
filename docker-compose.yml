@@ -1,17 +1,13 @@
-# Development-only compose file for running the agent container locally.
-#
-# IMPORTANT: mimOE (the local inference engine) runs NATIVELY on your host
-# device and should NOT be containerized — doing so loses hardware acceleration
-# (GPU/NPU) and mimik's peer-to-peer networking. This compose file only
-# containerizes the Python agent, which connects to mimOE on the host via
-# host.docker.internal.
+# Development compose file — builds the image locally from source.
+# For production / fleet deployment use docker-compose.prod.yml instead,
+# which pulls the pre-built image from GHCR and runs Watchtower for
+# automatic updates.
 #
 # Usage:
 #   docker compose run --rm agent -q "what is 6 * 7?"
-#   docker compose run --rm agent --trace   # show debug logs
+#   docker compose run --rm agent --trace
 #
-# On Linux, Docker does not add host.docker.internal automatically.
-# Uncomment the extra_hosts line below if you're on Linux.
+# IMPORTANT: mimOE runs NATIVELY on the host — do not containerize it.
 
 services:
   agent:

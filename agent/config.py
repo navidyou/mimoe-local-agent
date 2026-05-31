@@ -34,7 +34,7 @@ class Settings:
 
     # Id of a model currently loaded in mimOE. List loaded models with
     #   curl -H "Authorization: Bearer 1234" $MIMOE_BASE_URL/models
-    model: str = os.getenv("MIMOE_MODEL", "smollm-360m")
+    model: str = os.getenv("MIMOE_MODEL", "qwen3-4b")
 
     # Decoding controls. Low temperature keeps the small model's tool-routing
     # decisions stable and repeatable.
