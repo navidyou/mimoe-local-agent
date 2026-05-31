@@ -1,0 +1,137 @@
+Metadata-Version: 2.4
+Name: mimoe-local-agent
+Version: 0.1.0
+Summary: On-device AI agent running against a local mimOE inference node
+Requires-Python: >=3.11
+Description-Content-Type: text/markdown
+Requires-Dist: openai>=1.40.0
+Requires-Dist: python-dotenv>=1.0.0
+Requires-Dist: tenacity>=8.0.0
+Provides-Extra: dev
+Requires-Dist: ruff>=0.4.0; extra == "dev"
+Requires-Dist: mypy>=1.10.0; extra == "dev"
+Requires-Dist: pytest>=8.0.0; extra == "dev"
+Requires-Dist: pytest-cov>=5.0.0; extra == "dev"
+Requires-Dist: respx>=0.21.0; extra == "dev"
+Requires-Dist: httpx>=0.27.0; extra == "dev"
+Requires-Dist: pip-audit>=2.7.0; extra == "dev"
+
+# mimOE Local Agent
+
+A small AI agent that runs **entirely on-device** against a local
+[mimOE](https://developer.mimik.com/) inference node — no cloud API, no data
+leaving the machine. Built with the **BYO-Framework** approach: mimOE exposes an
+OpenAI-compatible endpoint, so the standard OpenAI SDK is pointed at the local
+node and used unchanged.
+
+```
+you > what is 12 * (3 + 4)?
+  [1] tool   -> calculator('12 * (3 + 4)')
+      result -> 84
+  [2] answer -> 12 * (3 + 4) is 84.
+
+12 * (3 + 4) is 84.
+```
+
+## How it works
+
+```
+            ┌──────────────────────────────────────────────┐
+  user      │                  Agent loop                  │
+  query ───►│  reason ─► act (tool) ─► observe ─► repeat    │
+            │            │                    ▲             │
+            └────────────┼────────────────────┼─────────────┘
+                         ▼                    │
+                ┌─────────────────┐   ┌────────────────┐
+                │  LocalLLM        │   │  Tools         │
+                │  (OpenAI SDK ──► │   │  calculator    │
+                │   mimOE @ :8083) │   │  current_time  │
+                └─────────────────┘   │  text_stats    │
+                         │            └────────────────┘
+                         ▼
+                ┌─────────────────────────────────────────┐
+                │ mimOE node — OpenAI-compatible inference │
+                │ /mimik-ai/openai/v1  (SmolLM-360M)      │
+                └─────────────────────────────────────────┘
+```
+
+Each turn the model returns one JSON decision — either call a tool or give a
+final answer. Tool results are fed back, and the loop continues (bounded by
+`MIMOE_MAX_STEPS`) until the model answers or the budget is spent.
+
+## Run it
+
+```bash
+# 1. mimOE Studio running with a model loaded (e.g. SmolLM-360M)
+# 2. set up
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env        # adjust if your API button shows a different path
+
+# 3. run
+python -m agent.main -q "what time is it?" --trace
+python -m agent.main                         # interactive REPL
+
+# 4. tests (no model required)
+pip install pytest && pytest -q
+```
+
+If mimOE isn't reachable the agent says so immediately and lists the models it
+*can* see, rather than hanging.
+
+## Design decisions
+
+**BYO-Framework via the OpenAI SDK, not a heavyweight agent framework.**
+mimOE's inference API is OpenAI-compatible, so the simplest, most transparent
+integration is the official OpenAI client with `base_url` swapped to the local
+node. The whole local-vs-cloud distinction collapses to one config line
+(`agent/llm.py`). LangChain/LlamaIndex/CrewAI would work the same way — they all
+just need a base URL — but for an agent this size they add abstraction without
+adding capability. To switch, wrap the same `base_url` in
+`langchain_openai.ChatOpenAI` and keep everything else.
+
+**A JSON-routing loop instead of native function-calling.** The models that run
+comfortably on-device (SmolLM-360M and similar) do not reliably emit
+well-formed OpenAI `tool_calls`, and native tool-calling support varies by
+backend. Asking for **one explicit JSON decision per step**, parsed defensively,
+is dramatically more robust on this model class while still being a real agent:
+it reasons, selects tools, observes results, and decides when to stop.
+
+**The model routes; the tools compute.** A 360M model is weak at arithmetic and
+has no clock, but it is fine at recognising intent and extracting an argument.
+So exactness lives in plain Python (`agent/tools.py`) and the model only does
+language understanding. This is the single most important reliability lever when
+the model is small.
+
+**Graceful degradation everywhere.** Malformed JSON from the model falls back to
+treating its text as the answer; an unknown tool name returns an observation
+rather than throwing; the loop is hard-capped; the `calculator` uses an AST
+walker (no `eval`) so a tool argument can never execute arbitrary code.
+
+**Config is fully environment-driven.** The same code targets a laptop, a peer
+node on the mesh, or CI with zero edits — which matches mimOE's distributed,
+node-per-device model.
+
+## Project layout
+
+```
+agent/
+  config.py   environment-driven settings
+  llm.py      OpenAI SDK pointed at mimOE  (the BYO-Framework seam)
+  tools.py    deterministic tools + registry
+  core.py     the reason -> act -> observe loop
+  main.py     CLI (one-shot + REPL, optional trace)
+tests/
+  test_tools.py   exactness tests for the deterministic layer
+```
+
+## Limitations & next steps
+
+- **Single-step tool use dominates** in practice on a 360M model; richer
+  multi-hop chains want a larger loaded model (configurable, no code change).
+- **No streaming** in the CLI — easy to add via `stream=True`, omitted to keep
+  the loop readable.
+- **Tools are illustrative.** The registry pattern makes adding real tools
+  (retrieval against a local `mKB`, a `requests` fetch, etc.) a few lines.
+- A natural mimik-native extension is to deploy this agent **as a mim** so it's
+  discoverable across the mesh, rather than running as a local script.

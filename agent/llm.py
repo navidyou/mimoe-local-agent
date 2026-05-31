@@ -10,11 +10,14 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any
+from typing import Any, cast
 
 from openai import OpenAI
+from openai.types.chat import ChatCompletionMessageParam
 
 from .config import settings
+
+Message = dict[str, str]
 
 
 class LocalLLM:
@@ -37,17 +40,17 @@ class LocalLLM:
         models = self._client.models.list()
         return [m.id for m in models.data]
 
-    def chat(self, messages: list[dict[str, str]], **overrides: Any) -> str:
+    def chat(self, messages: list[Message], **overrides: Any) -> str:
         """Single chat completion -> assistant text."""
         resp = self._client.chat.completions.create(
             model=settings.model,
-            messages=messages,
+            messages=cast(list[ChatCompletionMessageParam], messages),
             temperature=overrides.get("temperature", settings.temperature),
             max_tokens=overrides.get("max_tokens", settings.max_tokens),
         )
         return (resp.choices[0].message.content or "").strip()
 
-    def chat_json(self, messages: list[dict[str, str]]) -> dict[str, Any]:
+    def chat_json(self, messages: list[Message]) -> dict[str, Any]:
         """Chat completion whose response is parsed as a JSON object.
 
         We do NOT rely on the server's `response_format=json_object` flag: the
@@ -70,14 +73,14 @@ def _extract_json(text: str) -> dict[str, Any]:
 
     cleaned = text.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
     try:
-        return json.loads(cleaned)
+        return cast(dict[str, Any], json.loads(cleaned))
     except json.JSONDecodeError:
         pass
     # Fall back to grabbing the outermost {...} span.
     start, end = cleaned.find("{"), cleaned.rfind("}")
     if start != -1 and end > start:
         try:
-            return json.loads(cleaned[start : end + 1])
+            return cast(dict[str, Any], json.loads(cleaned[start : end + 1]))
         except json.JSONDecodeError:
             pass
     # Signal "no structured decision" to the caller.

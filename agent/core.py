@@ -13,7 +13,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from .config import settings
-from .llm import LocalLLM
+from .llm import LocalLLM, Message
 from .tools import REGISTRY, tool_catalog
 
 SYSTEM_PROMPT = f"""You answer questions, using a tool when one helps.
@@ -61,7 +61,7 @@ class Agent:
 
     def run(self, query: str) -> Result:
         system = SYSTEM_PROMPT + (" /no_think" if settings.no_think else "")
-        messages = [
+        messages: list[Message] = [
             {"role": "system", "content": system},
             *FEW_SHOT,
             {"role": "user", "content": query},

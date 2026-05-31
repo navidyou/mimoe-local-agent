@@ -14,8 +14,9 @@ from __future__ import annotations
 import ast
 import datetime as _dt
 import operator
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable
+from typing import Any, cast
 
 
 @dataclass(frozen=True)
@@ -27,7 +28,7 @@ class Tool:
 
 # --- tool implementations -------------------------------------------------
 
-_ALLOWED_OPS = {
+_ALLOWED_OPS: dict[type[ast.AST], Callable[..., Any]] = {
     ast.Add: operator.add,
     ast.Sub: operator.sub,
     ast.Mult: operator.mul,
@@ -42,11 +43,13 @@ _ALLOWED_OPS = {
 def _safe_eval(node: ast.AST) -> float:
     """Evaluate an arithmetic AST without exposing Python's eval()."""
     if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
-        return node.value
+        return float(node.value)
     if isinstance(node, ast.BinOp) and type(node.op) in _ALLOWED_OPS:
-        return _ALLOWED_OPS[type(node.op)](_safe_eval(node.left), _safe_eval(node.right))
+        bin_fn = cast(Callable[[float, float], float], _ALLOWED_OPS[type(node.op)])
+        return bin_fn(_safe_eval(node.left), _safe_eval(node.right))
     if isinstance(node, ast.UnaryOp) and type(node.op) in _ALLOWED_OPS:
-        return _ALLOWED_OPS[type(node.op)](_safe_eval(node.operand))
+        unary_fn = cast(Callable[[float], float], _ALLOWED_OPS[type(node.op)])
+        return unary_fn(_safe_eval(node.operand))
     raise ValueError("unsupported expression")
 
 
