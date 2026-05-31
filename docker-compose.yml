@@ -1,0 +1,27 @@
+# Development-only compose file for running the agent container locally.
+#
+# IMPORTANT: mimOE (the local inference engine) runs NATIVELY on your host
+# device and should NOT be containerized — doing so loses hardware acceleration
+# (GPU/NPU) and mimik's peer-to-peer networking. This compose file only
+# containerizes the Python agent, which connects to mimOE on the host via
+# host.docker.internal.
+#
+# Usage:
+#   docker compose run --rm agent -q "what is 6 * 7?"
+#   docker compose run --rm agent --trace   # show debug logs
+#
+# On Linux, Docker does not add host.docker.internal automatically.
+# Uncomment the extra_hosts line below if you're on Linux.
+
+services:
+  agent:
+    build: .
+    env_file:
+      - .env   # copy .env.example to .env and adjust
+    environment:
+      # Override base URL to reach mimOE running on the Docker host.
+      # On macOS/Windows: host.docker.internal resolves automatically.
+      # On Linux: uncomment extra_hosts below.
+      MIMOE_BASE_URL: http://host.docker.internal:8083/mimik-ai/openai/v1
+    # extra_hosts:
+    #   - "host.docker.internal:host-gateway"
