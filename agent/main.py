@@ -92,6 +92,15 @@ def main() -> int:
         handle(args.query)
         return 0
 
+    # Enable arrow-key history in the REPL on platforms that support readline.
+    try:
+        import readline  # noqa: F401 (side-effect import — enables history)
+    except ImportError:
+        try:
+            import pyreadline3  # noqa: F401  # Windows fallback if installed
+        except ImportError:
+            pass  # REPL still works, just without history navigation
+
     print("Interactive mode. Type a question, or 'exit' to quit.\n")
     while True:
         try:
