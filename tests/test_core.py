@@ -5,7 +5,6 @@ returns pre-scripted responses so we can exercise every branch of Agent.run().
 """
 from __future__ import annotations
 
-import json
 from collections.abc import Iterator
 from typing import Any
 from unittest.mock import MagicMock
@@ -13,7 +12,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from agent.core import Agent
-from agent.llm import LocalLLM, Message
+from agent.llm import LocalLLM
 
 
 def _make_llm(responses: list[dict[str, Any]]) -> LocalLLM:

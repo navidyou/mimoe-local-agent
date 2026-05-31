@@ -7,6 +7,7 @@ Defaults match a stock mimOE AI Foundation install.
 from __future__ import annotations
 
 import os
+import warnings
 from dataclasses import dataclass
 
 # Load a local .env file if present so the documented .env workflow actually
@@ -73,4 +74,27 @@ class Settings:
     log_level: str = os.getenv("LOG_LEVEL", "INFO")
 
 
+def _validate(s: Settings) -> None:
+    """Warn (not crash) on suspicious configuration values at startup."""
+    if s.api_key == "1234" and os.getenv("MIMOE_SUPPRESS_KEY_WARNING", "").lower() != "true":
+        warnings.warn(
+            "MIMOE_API_KEY is still the default '1234'. "
+            "Set it to a secure value for any non-local deployment. "
+            "Suppress this warning with MIMOE_SUPPRESS_KEY_WARNING=true.",
+            stacklevel=2,
+        )
+    if not s.base_url.rstrip("/").endswith("/v1"):
+        warnings.warn(
+            f"MIMOE_BASE_URL '{s.base_url}' does not end in '/v1'. "
+            "The OpenAI-compatible endpoint should be at the /v1 path.",
+            stacklevel=2,
+        )
+    if s.model != s.model.strip():
+        warnings.warn(
+            f"MIMOE_MODEL '{s.model}' has leading or trailing whitespace — this will likely fail.",
+            stacklevel=2,
+        )
+
+
 settings = Settings()
+_validate(settings)

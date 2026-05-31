@@ -8,6 +8,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import importlib.metadata
 import logging
 import sys
 
@@ -29,7 +30,13 @@ def _print_trace(result: Result) -> None:
 
 
 def main() -> int:
+    try:
+        _version = importlib.metadata.version("mimoe-local-agent")
+    except importlib.metadata.PackageNotFoundError:
+        _version = "0.0.0-dev"
+
     parser = argparse.ArgumentParser(description="A small agent running on a local mimOE model.")
+    parser.add_argument("--version", "-V", action="version", version=f"%(prog)s {_version}")
     parser.add_argument("--query", "-q", help="Run a single query and exit.")
     parser.add_argument(
         "--trace",
