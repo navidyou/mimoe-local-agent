@@ -58,8 +58,15 @@ class Settings:
     # never let the loop run unbounded.
     max_steps: int = int(os.getenv("MIMOE_MAX_STEPS", "4"))
 
-    # Network timeout (seconds) for a single inference call.
-    request_timeout: float = float(os.getenv("MIMOE_TIMEOUT", "60"))
+    # Network timeouts (seconds). Split so a slow model-load cold-start doesn't
+    # kill the read, and a hung read doesn't wait forever on connect.
+    # MIMOE_TIMEOUT is kept for backwards compatibility; the split values take
+    # precedence when set explicitly.
+    connect_timeout: float = float(os.getenv("MIMOE_CONNECT_TIMEOUT", "10"))
+    read_timeout: float = float(os.getenv("MIMOE_READ_TIMEOUT", os.getenv("MIMOE_TIMEOUT", "60")))
+
+    # Retry policy for transient connection/timeout errors.
+    retry_attempts: int = int(os.getenv("MIMOE_RETRY_ATTEMPTS", "3"))
 
     # Logging level. Use DEBUG to see full LLM request/response traces and
     # per-step timing. Equivalent to passing --trace on the CLI.

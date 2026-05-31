@@ -14,8 +14,16 @@ import re
 import time
 from typing import Any, cast
 
-from openai import OpenAI
+import httpx
+from openai import APIConnectionError, APITimeoutError, OpenAI
 from openai.types.chat import ChatCompletionMessageParam
+from tenacity import (
+    before_sleep_log,
+    retry,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_exponential,
+)
 
 from .config import settings
 
@@ -31,7 +39,12 @@ class LocalLLM:
         self._client = OpenAI(
             base_url=settings.base_url,
             api_key=settings.api_key,
-            timeout=settings.request_timeout,
+            timeout=httpx.Timeout(
+                connect=settings.connect_timeout,
+                read=settings.read_timeout,
+                write=settings.connect_timeout,
+                pool=settings.connect_timeout,
+            ),
         )
 
     def health_check(self) -> list[str]:
@@ -50,6 +63,13 @@ class LocalLLM:
             logger.error("mimOE health check failed", extra={"base_url": settings.base_url}, exc_info=True)
             raise
 
+    @retry(
+        retry=retry_if_exception_type((APIConnectionError, APITimeoutError)),
+        wait=wait_exponential(multiplier=1, min=1, max=10),
+        stop=stop_after_attempt(settings.retry_attempts),
+        before_sleep=before_sleep_log(logger, logging.WARNING),
+        reraise=True,
+    )
     def chat(self, messages: list[Message], **overrides: Any) -> str:
         """Single chat completion -> assistant text."""
         temperature = overrides.get("temperature", settings.temperature)
