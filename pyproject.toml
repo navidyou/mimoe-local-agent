@@ -12,8 +12,6 @@ dependencies = [
     "openai>=1.40.0",
     "python-dotenv>=1.0.0",
     "tenacity>=8.0.0",
-    "fastapi>=0.111.0",
-    "uvicorn[standard]>=0.30.0",
 ]
 
 [project.optional-dependencies]
@@ -29,7 +27,6 @@ dev = [
 
 [project.scripts]
 mimoe-agent = "agent.main:main"
-mimoe-agent-server = "agent.server:run"
 
 [tool.setuptools.packages.find]
 where = ["."]

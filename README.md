@@ -35,7 +35,7 @@ you > what is 12 * (3 + 4)?
                          ▼
                 ┌─────────────────────────────────────────┐
                 │ mimOE node — OpenAI-compatible inference │
-                │ /mimik-ai/openai/v1  (SmolLM-360M)      │
+                │ /mimik-ai/openai/v1  (qwen3-4b)         │
                 └─────────────────────────────────────────┘
 ```
 
@@ -78,26 +78,6 @@ make audit       # pip-audit vulnerability scan
 make clean       # remove __pycache__, .mypy_cache, etc.
 ```
 
-## Docker
-
-> **Important:** mimOE runs **natively on the host device** and should NOT be
-> containerized — it relies on hardware acceleration and mimik's peer-to-peer
-> networking. Only the Python agent is containerized.
-
-```bash
-# Build
-make docker-build
-
-# Run (agent connects to mimOE on the host via host.docker.internal)
-make docker-run
-
-# Or with docker compose
-docker compose run --rm agent -q "what is 6 * 7?"
-```
-
-On Linux you must add `--add-host=host.docker.internal:host-gateway` or uncomment
-the `extra_hosts` line in `docker-compose.yml`.
-
 ## Logging & tracing
 
 The agent emits structured JSON logs to stderr. Set `LOG_LEVEL=DEBUG` (or pass
@@ -118,9 +98,11 @@ stderr for production observability.
 |---|---|---|
 | `MIMOE_BASE_URL` | `http://localhost:8083/mimik-ai/openai/v1` | mimOE OpenAI-compatible endpoint |
 | `MIMOE_API_KEY` | `1234` | Bearer token (change for any real deployment) |
-| `MIMOE_MODEL` | `smollm-360m` | Model ID currently loaded in mimOE |
+| `MIMOE_MODEL` | `qwen3-4b` | Model ID currently loaded in mimOE |
 | `MIMOE_TEMPERATURE` | `0.1` | Decoding temperature |
 | `MIMOE_MAX_TOKENS` | `512` | Max output tokens per inference |
+| `MIMOE_DECISION_MAX_TOKENS` | `1024` | Token budget for the routing decision step |
+| `MIMOE_NO_THINK` | `true` | Strip `<think>` blocks from reasoning models (Qwen3 etc.) |
 | `MIMOE_MAX_STEPS` | `4` | Hard cap on agent loop iterations |
 | `MIMOE_CONNECT_TIMEOUT` | `10` | TCP connect timeout (s) |
 | `MIMOE_READ_TIMEOUT` | `60` | Inference read timeout (s) |
@@ -142,17 +124,22 @@ node. The whole local-vs-cloud distinction collapses to one config line
 (`agent/llm.py`).
 
 **A JSON-routing loop instead of native function-calling.** The models that run
-comfortably on-device (SmolLM-360M and similar) do not reliably emit
+comfortably on-device (SmolLM-360M, Qwen3-4B and similar) do not reliably emit
 well-formed OpenAI `tool_calls`. Asking for **one explicit JSON decision per
 step**, parsed defensively, is dramatically more robust on this model class.
 
-**The model routes; the tools compute.** A 360M model is weak at arithmetic and
-has no clock, but it is fine at recognising intent. Exactness lives in plain
-Python (`agent/tools.py`); the model only does language understanding.
+**The model routes; the tools compute.** Small on-device models are weak at
+arithmetic and have no clock, but they are fine at recognising intent. Exactness
+lives in plain Python (`agent/tools.py`); the model only does language
+understanding.
 
 **Graceful degradation everywhere.** Malformed JSON falls back to treating the
 model's text as the answer; unknown tool names return an observation; the loop is
 hard-capped; `calculator` uses an AST walker (no `eval`).
+
+**Reasoning model support.** Qwen3 emits `<think>...</think>` blocks before
+answering. The agent strips these automatically so the routing parser always sees
+clean JSON, regardless of whether the model honours the `/no_think` soft switch.
 
 ## Project layout
 
@@ -173,10 +160,8 @@ tests/
 
 ## Limitations & next steps
 
-- **Single-step tool use dominates** on a 360M model; richer multi-hop chains
-  work better with a larger loaded model (configurable, no code change).
+- **Single-step tool use dominates** on smaller models; richer multi-hop chains
+  work better with a larger loaded model (configurable via `MIMOE_MODEL`, no code change).
 - **No streaming** in the CLI — easy to add via `stream=True`.
 - **Tools are illustrative.** The registry pattern makes adding real tools
   (retrieval, HTTP fetch, local file access) a few lines each.
-- A natural mimik-native extension is deploying this agent **as a mim** so it's
-  discoverable across the mesh, rather than running as a local script.
